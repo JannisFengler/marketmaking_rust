@@ -3,8 +3,8 @@ use ethers::{
     types::H160,
 };
 use log::{error, info};
-use tokio::sync::mpsc::unbounded_channel;
 use std::collections::HashMap;
+use tokio::sync::mpsc::unbounded_channel;
 
 use crate::{
     bps_diff, truncate_float, BaseUrl, ClientCancelRequest, ClientLimit, ClientOrder,
@@ -52,8 +52,7 @@ impl MarketMaker {
 
         let info_client = InfoClient::new(None, Some(BaseUrl::Mainnet)).await?;
         let exchange_client =
-            ExchangeClient::new(None, input.wallet, Some(BaseUrl::Mainnet), None, None)
-                .await?;
+            ExchangeClient::new(None, input.wallet, Some(BaseUrl::Mainnet), None, None).await?;
 
         Ok(MarketMaker {
             asset: input.asset,
@@ -85,7 +84,8 @@ impl MarketMaker {
         let (sender, mut receiver) = unbounded_channel();
 
         // Subscribe to UserEvents for fills
-        if let Err(e) = self.info_client
+        if let Err(e) = self
+            .info_client
             .subscribe(
                 Subscription::UserEvents {
                     user: self.user_address,
@@ -99,7 +99,8 @@ impl MarketMaker {
         }
 
         // Subscribe to AllMids so we can market make around the mid price
-        if let Err(e) = self.info_client
+        if let Err(e) = self
+            .info_client
             .subscribe(Subscription::AllMids, sender)
             .await
         {
@@ -128,13 +129,13 @@ impl MarketMaker {
                         // Check to see if we need to cancel or place any new orders
                         self.potentially_update().await;
                     } else {
-                        error!("Invalid mid price format for asset {}: {:?}", self.asset, mid);
+                        error!(
+                            "Invalid mid price format for asset {}: {:?}",
+                            self.asset, mid
+                        );
                     }
                 } else {
-                    error!(
-                        "Could not get mid for asset {}: {:?}",
-                        self.asset, all_mids
-                    );
+                    error!("Could not get mid for asset {}: {:?}", self.asset, all_mids);
                 }
             }
             Message::User(user_events) => {
@@ -202,7 +203,8 @@ impl MarketMaker {
                                     error!("Error with canceling: {e}");
                                     if e.contains("Order does not exist")
                                         || e.contains("already canceled")
-                                        || e.contains("Order already filled") {
+                                        || e.contains("Order already filled")
+                                    {
                                         self.active_orders.remove(&oid); // Remove from active orders
                                         return true;
                                     }
@@ -210,17 +212,24 @@ impl MarketMaker {
                                 _ => unreachable!(),
                             }
                         } else {
-                            error!("Exchange data statuses is empty when canceling: {:?}", cancel);
+                            error!(
+                                "Exchange data statuses is empty when canceling: {:?}",
+                                cancel
+                            );
                         }
                     } else {
-                        error!("Exchange response data is empty when canceling: {:?}", cancel);
+                        error!(
+                            "Exchange response data is empty when canceling: {:?}",
+                            cancel
+                        );
                     }
                 }
                 ExchangeResponseStatus::Err(e) => {
                     error!("Error with canceling: {e}");
                     if e.contains("Order does not exist")
                         || e.contains("already canceled")
-                        || e.contains("Order already filled") {
+                        || e.contains("Order already filled")
+                    {
                         self.active_orders.remove(&oid); // Remove from active orders
                         return true;
                     }
@@ -275,10 +284,16 @@ impl MarketMaker {
                                 _ => unreachable!(),
                             }
                         } else {
-                            error!("Exchange data statuses is empty when placing order: {:?}", order);
+                            error!(
+                                "Exchange data statuses is empty when placing order: {:?}",
+                                order
+                            );
                         }
                     } else {
-                        error!("Exchange response data is empty when placing order: {:?}", order);
+                        error!(
+                            "Exchange response data is empty when placing order: {:?}",
+                            order
+                        );
                     }
                 }
                 ExchangeResponseStatus::Err(e) => {

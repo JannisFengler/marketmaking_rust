@@ -1,4 +1,27 @@
-# hyperliquid-rust-sdk
+# Internal marketmaking bot
+
+```bash
+# Static production build against musl. Outputs are at `result`.
+nix build
+
+# Development build.
+cargo build
+
+# Run one of the executables, e.g. the `market_maker` executable.
+cargo run --bin market_maker
+
+# Run the tests.
+nix flake check -L
+
+# Run pre-commit hooks manually.
+pre-commit run -a
+
+# Build the container and copy it to the local docker daemon.
+# (Needs custom entrypoint settings)
+nix run .#image.copyToDockerDaemon
+```
+
+## hyperliquid-rust-sdk
 
 SDK for Hyperliquid API trading with Rust.
 
