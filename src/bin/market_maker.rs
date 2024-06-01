@@ -1,5 +1,7 @@
+#![warn(clippy::all, clippy::nursery, clippy::pedantic)]
+
 use ethers::signers::LocalWallet;
-use hyperliquid_rust_sdk::{MarketMaker, MarketMakerInput};
+use hyperliquid_rust_sdk::{Input, MarketMaker};
 use std::sync::Arc;
 use tokio::sync::Mutex;
 
@@ -15,7 +17,7 @@ async fn main() {
     // Define a vector of market maker configurations
     let market_makers = vec![
         // SOL Market Maker
-        MarketMakerInput {
+        Input {
             asset: "SOL".to_string(),
             target_liquidity: 0.1,
             max_bps_diff: 10,
@@ -25,7 +27,7 @@ async fn main() {
             wallet: wallet.clone(),
         },
         // ETH Market Maker
-        MarketMakerInput {
+        Input {
             asset: "ETH".to_string(),
             target_liquidity: 0.003,
             max_bps_diff: 10,
@@ -35,7 +37,7 @@ async fn main() {
             wallet: wallet.clone(),
         },
         // BTC Market Maker
-        MarketMakerInput {
+        Input {
             asset: "BTC".to_string(),
             target_liquidity: 0.0002,
             max_bps_diff: 10,
@@ -45,7 +47,7 @@ async fn main() {
             wallet: wallet.clone(),
         },
         // ARB Market Maker
-        MarketMakerInput {
+        Input {
             asset: "ARB".to_string(),
             target_liquidity: 12.0,
             max_bps_diff: 10,
@@ -55,7 +57,7 @@ async fn main() {
             wallet: wallet.clone(),
         },
         // kPEPE Market Maker
-        MarketMakerInput {
+        Input {
             asset: "kPEPE".to_string(),
             target_liquidity: 1100.0,
             max_bps_diff: 16,
@@ -65,7 +67,7 @@ async fn main() {
             wallet: wallet.clone(),
         },
         // RNDR Market Maker
-        MarketMakerInput {
+        Input {
             asset: "RNDR".to_string(),
             target_liquidity: 1.5,
             max_bps_diff: 10,
@@ -82,7 +84,7 @@ async fn main() {
         .map(|input| {
             let wallet = Arc::new(Mutex::new(input.wallet));
             tokio::spawn(async move {
-                MarketMaker::new(MarketMakerInput {
+                MarketMaker::new(Input {
                     wallet: wallet.lock().await.clone(),
                     ..input
                 })
