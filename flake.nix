@@ -89,7 +89,7 @@
           ];
           nativeBuildInputs = [pkgs.pkg-config];
           CARGO_BUILD_TARGET = "x86_64-unknown-linux-musl";
-          CARGO_BUILD_RUSTFLAGS = "-C target-feature=+crt-static";
+          CARGO_BUILD_RUSTFLAGS = "-C target-feature=+crt-static -C target-feature=+aes,+sse2";
         };
 
         # Additional target for external dependencies to simplify caching.
@@ -177,6 +177,8 @@
             #                    irreproducible host C++ toolchain. Provide
             #                    this toolchain via nix for bitwise identical
             #                    binaries across machines.
+
+            export RUSTFLAGS="-C target-feature=+aes,+sse2"
             export CC=clang
           '';
         };

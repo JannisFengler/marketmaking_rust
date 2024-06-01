@@ -2,8 +2,8 @@ use ethers::{
     signers::{LocalWallet, Signer},
     types::H160,
 };
+use gxhash::{HashMap, HashMapExt};
 use log::{error, info};
-use std::collections::HashMap;
 use tokio::sync::mpsc::unbounded_channel;
 
 use crate::{

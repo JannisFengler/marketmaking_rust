@@ -33,3 +33,4 @@ thiserror = "1.0.44"
 tokio = {version = "1.29.1", features = ["full"]}
 tokio-tungstenite = {version = "0.20.0", features = ["native-tls"]}
 uuid = {version = "1.6.1", features = ["v4"]}
+gxhash = "3.4.1"

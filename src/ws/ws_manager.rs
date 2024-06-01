@@ -4,9 +4,10 @@ use crate::{
     Error, UserFills,
 };
 use futures_util::{stream::SplitSink, SinkExt, StreamExt};
+use gxhash::{HashMap, HashMapExt};
 use log::error;
 use serde::{Deserialize, Serialize};
-use std::{collections::HashMap, sync::Arc};
+use std::sync::Arc;
 use tokio::{
     net::TcpStream,
     spawn,

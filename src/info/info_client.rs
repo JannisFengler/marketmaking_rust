@@ -11,9 +11,9 @@ use crate::{
 };
 
 use ethers::types::H160;
+use gxhash::HashMap;
 use reqwest::Client;
 use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
 use tokio::sync::mpsc::UnboundedSender;
 
 #[derive(Deserialize, Serialize, Debug, Clone)]
