@@ -3,14 +3,15 @@ use ethers::{
     types::H160,
 };
 use log::{error, info};
-
 use tokio::sync::mpsc::unbounded_channel;
+use std::collections::HashMap;
 
 use crate::{
     bps_diff, truncate_float, BaseUrl, ClientCancelRequest, ClientLimit, ClientOrder,
     ClientOrderRequest, ExchangeClient, ExchangeDataStatus, ExchangeResponseStatus, InfoClient,
     Message, Subscription, EPSILON,
 };
+
 #[derive(Debug)]
 pub struct MarketMakerRestingOrder {
     pub oid: u64,
@@ -20,12 +21,12 @@ pub struct MarketMakerRestingOrder {
 
 pub struct MarketMakerInput {
     pub asset: String,
-    pub target_liquidity: f64, // Amount of liquidity on both sides to target
-    pub half_spread: u16,      // Half of the spread for our market making (in BPS)
-    pub max_bps_diff: u16, // Max deviation before we cancel and put new orders on the book (in BPS)
-    pub max_absolute_position_size: f64, // Absolute value of the max position we can take on
-    pub decimals: u32,     // Decimals to round to for pricing
-    pub wallet: LocalWallet, // Wallet containing private key
+    pub target_liquidity: f64,
+    pub half_spread: u16,
+    pub max_bps_diff: u16,
+    pub max_absolute_position_size: f64,
+    pub decimals: u32,
+    pub wallet: LocalWallet,
 }
 
 pub struct MarketMaker {
@@ -42,19 +43,19 @@ pub struct MarketMaker {
     pub info_client: InfoClient,
     pub exchange_client: ExchangeClient,
     pub user_address: H160,
+    pub active_orders: HashMap<u64, bool>, // Track active order IDs and their buy/sell status
 }
 
 impl MarketMaker {
-    pub async fn new(input: MarketMakerInput) -> MarketMaker {
+    pub async fn new(input: MarketMakerInput) -> Result<MarketMaker, Box<dyn std::error::Error>> {
         let user_address = input.wallet.address();
 
-        let info_client = InfoClient::new(None, Some(BaseUrl::Testnet)).await.unwrap();
+        let info_client = InfoClient::new(None, Some(BaseUrl::Mainnet)).await?;
         let exchange_client =
-            ExchangeClient::new(None, input.wallet, Some(BaseUrl::Testnet), None, None)
-                .await
-                .unwrap();
+            ExchangeClient::new(None, input.wallet, Some(BaseUrl::Mainnet), None, None)
+                .await?;
 
-        MarketMaker {
+        Ok(MarketMaker {
             asset: input.asset,
             target_liquidity: input.target_liquidity,
             half_spread: input.half_spread,
@@ -76,14 +77,15 @@ impl MarketMaker {
             info_client,
             exchange_client,
             user_address,
-        }
+            active_orders: HashMap::new(),
+        })
     }
 
     pub async fn start(&mut self) {
         let (sender, mut receiver) = unbounded_channel();
 
         // Subscribe to UserEvents for fills
-        self.info_client
+        if let Err(e) = self.info_client
             .subscribe(
                 Subscription::UserEvents {
                     user: self.user_address,
@@ -91,62 +93,96 @@ impl MarketMaker {
                 sender.clone(),
             )
             .await
-            .unwrap();
+        {
+            error!("Error subscribing to UserEvents: {:?}", e);
+            return;
+        }
 
         // Subscribe to AllMids so we can market make around the mid price
-        self.info_client
+        if let Err(e) = self.info_client
             .subscribe(Subscription::AllMids, sender)
             .await
-            .unwrap();
+        {
+            error!("Error subscribing to AllMids: {:?}", e);
+            return;
+        }
 
         loop {
-            let message = receiver.recv().await.unwrap();
-            match message {
-                Message::AllMids(all_mids) => {
-                    let all_mids = all_mids.data.mids;
-                    let mid = all_mids.get(&self.asset);
-                    if let Some(mid) = mid {
-                        let mid: f64 = mid.parse().unwrap();
-                        self.latest_mid_price = mid;
-                        // Check to see if we need to cancel or place any new orders
-                        self.potentially_update().await;
-                    } else {
-                        error!(
-                            "could not get mid for asset {}: {all_mids:?}",
-                            self.asset.clone()
-                        );
-                    }
-                }
-                Message::User(user_events) => {
-                    // We haven't seen the first mid price event yet, so just continue
-                    if self.latest_mid_price < 0.0 {
-                        continue;
-                    }
-                    let fills = user_events.data.fills;
-                    for fill in fills {
-                        let amount: f64 = fill.sz.parse().unwrap();
-                        // Update our resting positions whenever we see a fill
-                        if fill.side.eq("B") {
-                            self.cur_position += amount;
-                            self.lower_resting.position -= amount;
-                            info!("Fill: bought {amount} {}", self.asset.clone());
-                        } else {
-                            self.cur_position -= amount;
-                            self.upper_resting.position -= amount;
-                            info!("Fill: sold {amount} {}", self.asset.clone());
-                        }
-                    }
-                    // Check to see if we need to cancel or place any new orders
-                    self.potentially_update().await;
-                }
-                _ => {
-                    panic!("Unsupported message type");
+            match receiver.recv().await {
+                Some(message) => self.process_message(message).await,
+                None => {
+                    error!("Error receiving message from channel");
+                    break;
                 }
             }
         }
     }
 
-    async fn attempt_cancel(&self, asset: String, oid: u64) -> bool {
+    async fn process_message(&mut self, message: Message) {
+        match message {
+            Message::AllMids(all_mids) => {
+                let all_mids = all_mids.data.mids;
+                if let Some(mid) = all_mids.get(&self.asset) {
+                    if let Ok(mid) = mid.parse::<f64>() {
+                        self.latest_mid_price = mid;
+                        // Check to see if we need to cancel or place any new orders
+                        self.potentially_update().await;
+                    } else {
+                        error!("Invalid mid price format for asset {}: {:?}", self.asset, mid);
+                    }
+                } else {
+                    error!(
+                        "Could not get mid for asset {}: {:?}",
+                        self.asset, all_mids
+                    );
+                }
+            }
+            Message::User(user_events) => {
+                // We haven't seen the first mid price event yet, so just continue
+                if self.latest_mid_price < 0.0 {
+                    return;
+                }
+                let fills = user_events.data.fills;
+                for fill in fills {
+                    if fill.coin == self.asset {
+                        let amount: f64 = fill.sz.parse().unwrap();
+                        // Update our resting positions whenever we see a fill
+                        if fill.side.eq("B") {
+                            self.cur_position += amount;
+                            if let Some(is_buy) = self.active_orders.remove(&fill.oid) {
+                                if is_buy {
+                                    self.lower_resting.position -= amount;
+                                }
+                            }
+                            info!("Fill: bought {amount} {}", self.asset);
+                        } else {
+                            self.cur_position -= amount;
+                            if let Some(is_buy) = self.active_orders.remove(&fill.oid) {
+                                if !is_buy {
+                                    self.upper_resting.position -= amount;
+                                }
+                            }
+                            info!("Fill: sold {amount} {}", self.asset);
+                        }
+                    }
+                }
+                // Check to see if we need to cancel or place any new orders
+                self.potentially_update().await;
+            }
+            _ => {
+                error!("Unsupported message type: {:?}", message);
+            }
+        }
+    }
+
+    async fn attempt_cancel(&mut self, asset: String, oid: u64) -> bool {
+        // Check if the order is still considered active
+        if !self.active_orders.contains_key(&oid) {
+            info!("Order was never placed, already canceled, or filled: oid={oid}");
+            return true; // No need to cancel
+        }
+
+        // Attempt to cancel the order
         let cancel = self
             .exchange_client
             .cancel(ClientCancelRequest { asset, oid }, None)
@@ -159,29 +195,44 @@ impl MarketMaker {
                         if !cancel.statuses.is_empty() {
                             match cancel.statuses[0].clone() {
                                 ExchangeDataStatus::Success => {
+                                    self.active_orders.remove(&oid); // Remove from active orders
                                     return true;
                                 }
                                 ExchangeDataStatus::Error(e) => {
-                                    error!("Error with cancelling: {e}")
+                                    error!("Error with canceling: {e}");
+                                    if e.contains("Order does not exist")
+                                        || e.contains("already canceled")
+                                        || e.contains("Order already filled") {
+                                        self.active_orders.remove(&oid); // Remove from active orders
+                                        return true;
+                                    }
                                 }
                                 _ => unreachable!(),
                             }
                         } else {
-                            error!("Exchange data statuses is empty when cancelling: {cancel:?}")
+                            error!("Exchange data statuses is empty when canceling: {:?}", cancel);
                         }
                     } else {
-                        error!("Exchange response data is empty when cancelling: {cancel:?}")
+                        error!("Exchange response data is empty when canceling: {:?}", cancel);
                     }
                 }
-                ExchangeResponseStatus::Err(e) => error!("Error with cancelling: {e}"),
+                ExchangeResponseStatus::Err(e) => {
+                    error!("Error with canceling: {e}");
+                    if e.contains("Order does not exist")
+                        || e.contains("already canceled")
+                        || e.contains("Order already filled") {
+                        self.active_orders.remove(&oid); // Remove from active orders
+                        return true;
+                    }
+                }
             },
-            Err(e) => error!("Error with cancelling: {e}"),
+            Err(e) => error!("Error with canceling: {e}"),
         }
         false
     }
 
     async fn place_order(
-        &self,
+        &mut self,
         asset: String,
         amount: f64,
         price: f64,
@@ -211,25 +262,27 @@ impl MarketMaker {
                         if !order.statuses.is_empty() {
                             match order.statuses[0].clone() {
                                 ExchangeDataStatus::Filled(order) => {
+                                    self.active_orders.remove(&order.oid); // Remove from active orders
                                     return (amount, order.oid);
                                 }
                                 ExchangeDataStatus::Resting(order) => {
+                                    self.active_orders.insert(order.oid, is_buy); // Add to active orders
                                     return (amount, order.oid);
                                 }
                                 ExchangeDataStatus::Error(e) => {
-                                    error!("Error with placing order: {e}")
+                                    error!("Error with placing order: {e}");
                                 }
                                 _ => unreachable!(),
                             }
                         } else {
-                            error!("Exchange data statuses is empty when placing order: {order:?}")
+                            error!("Exchange data statuses is empty when placing order: {:?}", order);
                         }
                     } else {
-                        error!("Exchange response data is empty when placing order: {order:?}")
+                        error!("Exchange response data is empty when placing order: {:?}", order);
                     }
                 }
                 ExchangeResponseStatus::Err(e) => {
-                    error!("Error with placing order: {e}")
+                    error!("Error with placing order: {e}");
                 }
             },
             Err(e) => error!("Error with placing order: {e}"),
@@ -271,7 +324,6 @@ impl MarketMaker {
             || bps_diff(upper_price, self.upper_resting.price) > self.max_bps_diff;
 
         // Consider cancelling
-        // TODO: Don't block on cancels
         if self.lower_resting.oid != 0 && self.lower_resting.position > EPSILON && lower_change {
             let cancel = self
                 .attempt_cancel(self.asset.clone(), self.lower_resting.oid)
@@ -306,7 +358,7 @@ impl MarketMaker {
             if amount_resting > EPSILON {
                 info!(
                     "Buy for {amount_resting} {} resting at {lower_price}",
-                    self.asset.clone()
+                    self.asset
                 );
             }
         }
@@ -322,7 +374,7 @@ impl MarketMaker {
             if amount_resting > EPSILON {
                 info!(
                     "Sell for {amount_resting} {} resting at {upper_price}",
-                    self.asset.clone()
+                    self.asset
                 );
             }
         }
