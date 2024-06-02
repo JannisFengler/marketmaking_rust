@@ -21,10 +21,10 @@ use ethers::{
     signers::{LocalWallet, Signer},
     types::{Signature, H160, H256},
 };
+use gxhash::{HashMap, HashMapExt};
 use log::debug;
 use reqwest::Client;
 use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
 
 use super::cancel::ClientCancelRequestCloid;
 

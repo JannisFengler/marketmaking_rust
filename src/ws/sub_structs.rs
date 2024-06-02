@@ -1,6 +1,6 @@
 use ethers::types::H160;
+use gxhash::HashMap;
 use serde::Deserialize;
-use std::collections::HashMap;
 
 #[derive(Deserialize, Clone, Debug)]
 pub struct Trade {
