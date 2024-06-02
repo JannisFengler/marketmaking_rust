@@ -1,3 +1,5 @@
+#![warn(clippy::all, clippy::nursery, clippy::pedantic)]
+
 use ethers::{
     signers::{LocalWallet, Signer},
     types::H160,
@@ -13,13 +15,13 @@ use crate::{
 };
 
 #[derive(Debug)]
-pub struct MarketMakerRestingOrder {
+pub struct RestingOrder {
     pub oid: u64,
     pub position: f64,
     pub price: f64,
 }
 
-pub struct MarketMakerInput {
+pub struct Input {
     pub asset: String,
     pub target_liquidity: f64,
     pub half_spread: u16,
@@ -36,8 +38,8 @@ pub struct MarketMaker {
     pub max_bps_diff: u16,
     pub max_absolute_position_size: f64,
     pub decimals: u32,
-    pub lower_resting: MarketMakerRestingOrder,
-    pub upper_resting: MarketMakerRestingOrder,
+    pub lower_resting: RestingOrder,
+    pub upper_resting: RestingOrder,
     pub cur_position: f64,
     pub latest_mid_price: f64,
     pub info_client: InfoClient,
@@ -47,26 +49,29 @@ pub struct MarketMaker {
 }
 
 impl MarketMaker {
-    pub async fn new(input: MarketMakerInput) -> Result<MarketMaker, Box<dyn std::error::Error>> {
+    /// # Errors
+    ///
+    /// Returns `Err` if the exchange or info clients can't be created.
+    pub async fn new(input: Input) -> Result<Self, Box<dyn std::error::Error>> {
         let user_address = input.wallet.address();
 
         let info_client = InfoClient::new(None, Some(BaseUrl::Mainnet)).await?;
         let exchange_client =
             ExchangeClient::new(None, input.wallet, Some(BaseUrl::Mainnet), None, None).await?;
 
-        Ok(MarketMaker {
+        Ok(Self {
             asset: input.asset,
             target_liquidity: input.target_liquidity,
             half_spread: input.half_spread,
             max_bps_diff: input.max_bps_diff,
             max_absolute_position_size: input.max_absolute_position_size,
             decimals: input.decimals,
-            lower_resting: MarketMakerRestingOrder {
+            lower_resting: RestingOrder {
                 oid: 0,
                 position: 0.0,
                 price: -1.0,
             },
-            upper_resting: MarketMakerRestingOrder {
+            upper_resting: RestingOrder {
                 oid: 0,
                 position: 0.0,
                 price: -1.0,
@@ -109,12 +114,11 @@ impl MarketMaker {
         }
 
         loop {
-            match receiver.recv().await {
-                Some(message) => self.process_message(message).await,
-                None => {
-                    error!("Error receiving message from channel");
-                    break;
-                }
+            if let Some(message) = receiver.recv().await {
+                self.process_message(message).await;
+            } else {
+                error!("Error receiving message from channel");
+                break;
             }
         }
     }
@@ -193,7 +197,12 @@ impl MarketMaker {
             Ok(cancel) => match cancel {
                 ExchangeResponseStatus::Ok(cancel) => {
                     if let Some(cancel) = cancel.data {
-                        if !cancel.statuses.is_empty() {
+                        if cancel.statuses.is_empty() {
+                            error!(
+                                "Exchange data statuses is empty when canceling: {:?}",
+                                cancel
+                            );
+                        } else {
                             match cancel.statuses[0].clone() {
                                 ExchangeDataStatus::Success => {
                                     self.active_orders.remove(&oid); // Remove from active orders
@@ -211,11 +220,6 @@ impl MarketMaker {
                                 }
                                 _ => unreachable!(),
                             }
-                        } else {
-                            error!(
-                                "Exchange data statuses is empty when canceling: {:?}",
-                                cancel
-                            );
                         }
                     } else {
                         error!(
@@ -268,7 +272,12 @@ impl MarketMaker {
             Ok(order) => match order {
                 ExchangeResponseStatus::Ok(order) => {
                     if let Some(order) = order.data {
-                        if !order.statuses.is_empty() {
+                        if order.statuses.is_empty() {
+                            error!(
+                                "Exchange data statuses is empty when placing order: {:?}",
+                                order
+                            );
+                        } else {
                             match order.statuses[0].clone() {
                                 ExchangeDataStatus::Filled(order) => {
                                     self.active_orders.remove(&order.oid); // Remove from active orders
@@ -283,11 +292,6 @@ impl MarketMaker {
                                 }
                                 _ => unreachable!(),
                             }
-                        } else {
-                            error!(
-                                "Exchange data statuses is empty when placing order: {:?}",
-                                order
-                            );
                         }
                     } else {
                         error!(
@@ -306,7 +310,7 @@ impl MarketMaker {
     }
 
     async fn potentially_update(&mut self) {
-        let half_spread = (self.latest_mid_price * self.half_spread as f64) / 10000.0;
+        let half_spread = (self.latest_mid_price * f64::from(self.half_spread)) / 10000.0;
         // Determine prices to target from the half spread
         let (lower_price, upper_price) = (
             self.latest_mid_price - half_spread,
@@ -324,13 +328,11 @@ impl MarketMaker {
         }
 
         // Determine amounts we can put on the book without exceeding the max absolute position size
-        let lower_order_amount = (self.max_absolute_position_size - self.cur_position)
-            .min(self.target_liquidity)
-            .max(0.0);
+        let lower_order_amount =
+            (self.max_absolute_position_size - self.cur_position).clamp(0.0, self.target_liquidity);
 
-        let upper_order_amount = (self.max_absolute_position_size + self.cur_position)
-            .min(self.target_liquidity)
-            .max(0.0);
+        let upper_order_amount =
+            (self.max_absolute_position_size + self.cur_position).clamp(0.0, self.target_liquidity);
 
         // Determine if we need to cancel the resting order and put a new order up due to deviation
         let lower_change = (lower_order_amount - self.lower_resting.position).abs() > EPSILON
