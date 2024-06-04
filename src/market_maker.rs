@@ -98,22 +98,18 @@ impl MarketMaker {
 
     async fn fetch_open_orders(&mut self) -> Result<(), Box<dyn std::error::Error>> {
         let open_orders = self.info_client.open_orders(self.user_address).await?;
-        for order in open_orders {
-            if order.coin == self.asset {
-                self.active_orders.insert(order.oid, order.side == "B");
-                if order.side == "B" {
-                    self.lower_resting = RestingOrder {
-                        oid: order.oid,
-                        position: order.sz.parse().unwrap_or(0.0),
-                        price: order.limit_px.parse().unwrap_or(0.0),
-                    };
-                } else {
-                    self.upper_resting = RestingOrder {
-                        oid: order.oid,
-                        position: order.sz.parse().unwrap_or(0.0),
-                        price: order.limit_px.parse().unwrap_or(0.0),
-                    };
-                }
+        for order in open_orders.into_iter().filter(|o| o.coin == self.asset) {
+            self.active_orders.insert(order.oid, order.side == "B");
+
+            let resting_order = RestingOrder {
+                oid: order.oid,
+                position: order.sz.parse().unwrap_or_default(),
+                price: order.limit_px.parse().unwrap_or_default(),
+            };
+
+            match order.side.as_str() {
+                "B" => self.lower_resting = resting_order,
+                _ => self.upper_resting = resting_order,
             }
         }
         Ok(())
