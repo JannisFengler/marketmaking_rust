@@ -59,7 +59,7 @@ impl MarketMaker {
         let exchange_client =
             ExchangeClient::new(None, input.wallet, Some(BaseUrl::Mainnet), None, None).await?;
 
-        Ok(Self {
+        let mut market_maker = Self {
             asset: input.asset,
             target_liquidity: input.target_liquidity,
             half_spread: input.half_spread,
@@ -82,7 +82,52 @@ impl MarketMaker {
             exchange_client,
             user_address,
             active_orders: HashMap::new(),
-        })
+        };
+
+        // Fetch and update the state with open orders and positions
+        market_maker.update_state().await?;
+
+        Ok(market_maker)
+    }
+
+    async fn update_state(&mut self) -> Result<(), Box<dyn std::error::Error>> {
+        self.fetch_open_orders().await?;
+        self.fetch_current_position().await?;
+        Ok(())
+    }
+
+    async fn fetch_open_orders(&mut self) -> Result<(), Box<dyn std::error::Error>> {
+        let open_orders = self.info_client.open_orders(self.user_address).await?;
+        for order in open_orders {
+            if order.coin == self.asset {
+                self.active_orders.insert(order.oid, order.side == "B");
+                if order.side == "B" {
+                    self.lower_resting = RestingOrder {
+                        oid: order.oid,
+                        position: order.sz.parse().unwrap_or(0.0),
+                        price: order.limit_px.parse().unwrap_or(0.0),
+                    };
+                } else {
+                    self.upper_resting = RestingOrder {
+                        oid: order.oid,
+                        position: order.sz.parse().unwrap_or(0.0),
+                        price: order.limit_px.parse().unwrap_or(0.0),
+                    };
+                }
+            }
+        }
+        Ok(())
+    }
+
+    async fn fetch_current_position(&mut self) -> Result<(), Box<dyn std::error::Error>> {
+        let user_state = self.info_client.user_state(self.user_address).await?;
+        for position in &user_state.asset_positions {
+            if position.type_string == self.asset {
+                self.cur_position = position.position.szi.parse()?; // Access the correct field
+                break;
+            }
+        }
+        Ok(())
     }
 
     pub async fn start(&mut self) {
