@@ -121,11 +121,12 @@ impl MarketMaker {
 
     async fn fetch_current_position(&mut self) -> Result<(), Box<dyn std::error::Error>> {
         let user_state = self.info_client.user_state(self.user_address).await?;
-        for position in &user_state.asset_positions {
-            if position.type_string == self.asset {
-                self.cur_position = position.position.szi.parse()?; // Access the correct field
-                break;
-            }
+        if let Some(position) = user_state
+            .asset_positions
+            .iter()
+            .find(|&pos| pos.type_string == self.asset)
+        {
+            self.cur_position = position.position.szi.parse()?;
         }
         Ok(())
     }
