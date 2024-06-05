@@ -113,14 +113,10 @@ impl MarketMaker {
             return;
         }
 
-        loop {
-            if let Some(message) = receiver.recv().await {
-                self.process_message(message).await;
-            } else {
-                error!("Error receiving message from channel");
-                break;
-            }
+        while let Some(message) = receiver.recv().await {
+            self.process_message(message).await;
         }
+        error!("Receiver stream ended");
     }
 
     async fn process_message(&mut self, message: Message) {
