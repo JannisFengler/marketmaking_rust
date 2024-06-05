@@ -43,6 +43,8 @@ pub struct TradeInfo {
     pub start_position: String,
     pub dir: String,
     pub closed_pnl: String,
+    // TODO(aaronmondal): Benchmarks show that we can improve performance by
+    // turning the `oid` into a `u32`. Evaluate whether that's possible.
     pub oid: u64,
     pub cloid: Option<String>,
     pub crossed: bool,
