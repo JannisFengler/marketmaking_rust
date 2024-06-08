@@ -59,7 +59,7 @@ impl MarketMaker {
         let exchange_client =
             ExchangeClient::new(None, input.wallet, Some(BaseUrl::Mainnet), None, None).await?;
 
-        Ok(Self {
+        let mut market_maker = Self {
             asset: input.asset,
             target_liquidity: input.target_liquidity,
             half_spread: input.half_spread,
@@ -82,7 +82,67 @@ impl MarketMaker {
             exchange_client,
             user_address,
             active_orders: HashMap::new(),
-        })
+        };
+
+        // Fetch and update the state with open orders and positions
+        market_maker.update_state().await?;
+
+        Ok(market_maker)
+    }
+
+    /// Updates state with open orders and positions.
+    ///
+    /// # Errors
+    ///
+    /// Returns `Err` if there's an error fetching open orders or the
+    /// current position.
+    async fn update_state(&mut self) -> Result<(), Box<dyn std::error::Error>> {
+        self.fetch_open_orders().await?;
+        self.fetch_current_position().await?;
+        Ok(())
+    }
+
+    /// Fetches and updates active and resting orders.
+    ///
+    /// # Errors
+    ///
+    /// Returns `Err` if there's an error fetching the open orders from the
+    /// exchange.
+    async fn fetch_open_orders(&mut self) -> Result<(), Box<dyn std::error::Error>> {
+        let open_orders = self.info_client.open_orders(self.user_address).await?;
+        for order in open_orders.into_iter().filter(|o| o.coin == self.asset) {
+            self.active_orders.insert(order.oid, order.side == "B");
+
+            let resting_order = RestingOrder {
+                oid: order.oid,
+                position: order.sz.parse().unwrap_or_default(),
+                price: order.limit_px.parse().unwrap_or_default(),
+            };
+
+            match order.side.as_str() {
+                "B" => self.lower_resting = resting_order,
+                _ => self.upper_resting = resting_order,
+            }
+        }
+        Ok(())
+    }
+
+    /// Fetches and updates current user position.
+    ///
+    /// # Errors
+    ///
+    /// Returns `Err` if there's an error fetching the user state from the
+    /// exchange or parsing the position value.
+    async fn fetch_current_position(&mut self) -> Result<(), Box<dyn std::error::Error>> {
+        let user_state = self.info_client.user_state(self.user_address).await?;
+        if let Some(position) = user_state
+            .asset_positions
+            .iter()
+            .find(|&pos| pos.type_string == self.asset)
+        {
+            self.cur_position = position.position.szi.parse()?;
+        }
+        Ok(())
     }
 
     pub async fn start(&mut self) {
@@ -324,9 +384,9 @@ impl MarketMaker {
         }
 
         // Determine amounts we can put on the book without exceeding the max absolute position size
+        // Consider the current position when calculating order amounts
         let lower_order_amount =
             (self.max_absolute_position_size - self.cur_position).clamp(0.0, self.target_liquidity);
-
         let upper_order_amount =
             (self.max_absolute_position_size + self.cur_position).clamp(0.0, self.target_liquidity);
 
