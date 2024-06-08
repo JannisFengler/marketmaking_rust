@@ -21,6 +21,15 @@ pre-commit run -a
 nix run .#image.copyToDockerDaemon
 ```
 
+## Benchmarking
+
+Add a new file to the `benches` directory and add a new `[[bench]]` section in
+`Cargo.toml`. Then you can invoke the benchmark like so:
+
+```bash
+cargo bench --bench my_benchmark
+```
+
 ## hyperliquid-rust-sdk
 
 SDK for Hyperliquid API trading with Rust.

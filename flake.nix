@@ -166,6 +166,7 @@
 
             customClang
             pkgs.openssl
+            pkgs.gnuplot
           ];
           shellHook = ''
             # Generate the .pre-commit-config.yaml symlink when entering the
