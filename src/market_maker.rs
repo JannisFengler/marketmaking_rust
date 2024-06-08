@@ -90,12 +90,24 @@ impl MarketMaker {
         Ok(market_maker)
     }
 
+    /// Updates state with open orders and positions.
+    ///
+    /// # Errors
+    ///
+    /// Returns `Err` if there's an error fetching open orders or the
+    /// current position.
     async fn update_state(&mut self) -> Result<(), Box<dyn std::error::Error>> {
         self.fetch_open_orders().await?;
         self.fetch_current_position().await?;
         Ok(())
     }
 
+    /// Fetches and updates active and resting orders.
+    ///
+    /// # Errors
+    ///
+    /// Returns `Err` if there's an error fetching the open orders from the
+    /// exchange.
     async fn fetch_open_orders(&mut self) -> Result<(), Box<dyn std::error::Error>> {
         let open_orders = self.info_client.open_orders(self.user_address).await?;
         for order in open_orders.into_iter().filter(|o| o.coin == self.asset) {
@@ -115,6 +127,12 @@ impl MarketMaker {
         Ok(())
     }
 
+    /// Fetches and updates current user position.
+    ///
+    /// # Errors
+    ///
+    /// Returns `Err` if there's an error fetching the user state from the
+    /// exchange or parsing the position value. 
     async fn fetch_current_position(&mut self) -> Result<(), Box<dyn std::error::Error>> {
         let user_state = self.info_client.user_state(self.user_address).await?;
         if let Some(position) = user_state
@@ -370,11 +388,11 @@ impl MarketMaker {
         }
 
         // Determine amounts we can put on the book without exceeding the max absolute position size
-        let lower_order_amount =
-            (self.max_absolute_position_size - self.cur_position).clamp(0.0, self.target_liquidity);
-
-        let upper_order_amount =
-            (self.max_absolute_position_size + self.cur_position).clamp(0.0, self.target_liquidity);
+        // Consider the current position when calculating order amounts
+        let lower_order_amount = (self.max_absolute_position_size - self.cur_position)
+            .clamp(0.0, self.target_liquidity); 
+        let upper_order_amount = (self.max_absolute_position_size + self.cur_position)
+            .clamp(0.0, self.target_liquidity);
 
         // Determine if we need to cancel the resting order and put a new order up due to deviation
         let lower_change = (lower_order_amount - self.lower_resting.position).abs() > EPSILON
