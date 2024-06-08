@@ -132,7 +132,7 @@ impl MarketMaker {
     /// # Errors
     ///
     /// Returns `Err` if there's an error fetching the user state from the
-    /// exchange or parsing the position value. 
+    /// exchange or parsing the position value.
     async fn fetch_current_position(&mut self) -> Result<(), Box<dyn std::error::Error>> {
         let user_state = self.info_client.user_state(self.user_address).await?;
         if let Some(position) = user_state
@@ -390,7 +390,7 @@ impl MarketMaker {
         // Determine amounts we can put on the book without exceeding the max absolute position size
         // Consider the current position when calculating order amounts
         let lower_order_amount = (self.max_absolute_position_size - self.cur_position)
-            .clamp(0.0, self.target_liquidity); 
+            .clamp(0.0, self.target_liquidity);
         let upper_order_amount = (self.max_absolute_position_size + self.cur_position)
             .clamp(0.0, self.target_liquidity);
 
