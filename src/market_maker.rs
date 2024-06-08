@@ -389,10 +389,10 @@ impl MarketMaker {
 
         // Determine amounts we can put on the book without exceeding the max absolute position size
         // Consider the current position when calculating order amounts
-        let lower_order_amount = (self.max_absolute_position_size - self.cur_position)
-            .clamp(0.0, self.target_liquidity);
-        let upper_order_amount = (self.max_absolute_position_size + self.cur_position)
-            .clamp(0.0, self.target_liquidity);
+        let lower_order_amount =
+            (self.max_absolute_position_size - self.cur_position).clamp(0.0, self.target_liquidity);
+        let upper_order_amount =
+            (self.max_absolute_position_size + self.cur_position).clamp(0.0, self.target_liquidity);
 
         // Determine if we need to cancel the resting order and put a new order up due to deviation
         let lower_change = (lower_order_amount - self.lower_resting.position).abs() > EPSILON
