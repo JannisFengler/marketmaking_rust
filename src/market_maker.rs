@@ -317,13 +317,15 @@ impl MarketMaker {
                     limit_px: price,
                     sz: amount,
                     cloid: None,
+                    // Use ALO TIF for post-only
                     order_type: ClientOrder::Limit(ClientLimit {
-                        tif: "Gtc".to_string(),
+                        tif: "Alo".to_string(),
                     }),
                 },
                 None,
             )
             .await;
+
         match order {
             Ok(order) => match order {
                 ExchangeResponseStatus::Ok(order) => {
@@ -333,36 +335,39 @@ impl MarketMaker {
                                 "Exchange data statuses is empty when placing order: {:?}",
                                 order
                             );
-                        } else {
-                            match order.statuses[0].clone() {
-                                ExchangeDataStatus::Filled(order) => {
-                                    self.active_orders.remove(&order.oid); // Remove from active orders
-                                    return (amount, order.oid);
-                                }
-                                ExchangeDataStatus::Resting(order) => {
-                                    self.active_orders.insert(order.oid, is_buy); // Add to active orders
-                                    return (amount, order.oid);
-                                }
-                                ExchangeDataStatus::Error(e) => {
-                                    error!("Error with placing order: {e}");
-                                }
-                                _ => unreachable!(),
+                            return (0.0, 0);
+                        }
+                        match order.statuses[0].clone() {
+                            ExchangeDataStatus::Resting(order) => {
+                                self.active_orders.insert(order.oid, is_buy);
+                                return (amount, order.oid);
                             }
+                            ExchangeDataStatus::Error(e) => {
+                                if e.contains("Invalid Time in Force") {
+                                    // Adjust to Hyperliquid's specific error message
+                                    info!("Post-only order rejected. Will retry on next price update.");
+                                } else {
+                                    error!("Error with placing order: {}", e);
+                                }
+                            }
+                            _ => {}
                         }
                     } else {
                         error!(
                             "Exchange response data is empty when placing order: {:?}",
                             order
                         );
+                        return (0.0, 0);
                     }
                 }
                 ExchangeResponseStatus::Err(e) => {
-                    error!("Error with placing order: {e}");
+                    error!("Error with placing order: {}", e);
                 }
             },
-            Err(e) => error!("Error with placing order: {e}"),
+            Err(e) => error!("Error with placing order: {}", e),
         }
-        (0.0, 0)
+
+        (0.0, 0) // Order placement failed
     }
 
     async fn potentially_update(&mut self) {
