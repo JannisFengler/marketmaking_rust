@@ -165,6 +165,7 @@
             pkgs.kustomize
 
             customClang
+            pkgs.pkg-config
             pkgs.openssl
             pkgs.gnuplot
           ];
